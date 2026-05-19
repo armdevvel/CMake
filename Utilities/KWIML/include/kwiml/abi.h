@@ -375,6 +375,10 @@ suppression macro KWIML_ABI_NO_VERIFY was defined.
 #  define KWIML_ABI_ENDIAN_ID KWIML_ABI_ENDIAN_ID_BIG
 # endif
 
+/* Arm (Windows) */
+#  elif defined(_M_ARM)
+#    define KWIML_ABI_ENDIAN_ID KWIML_ABI_ENDIAN_ID_LITTLE
+
 /* Intel x86 */
 #elif defined(__i386) || defined(__i386__) || defined(_M_IX86)
 # define KWIML_ABI_ENDIAN_ID KWIML_ABI_ENDIAN_ID_LITTLE
