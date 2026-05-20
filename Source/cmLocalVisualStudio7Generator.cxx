@@ -3,7 +3,6 @@
 #include "cmLocalVisualStudio7Generator.h"
 
 #include <algorithm>
-#include <cassert>
 #include <cstring>
 #include <functional>
 #include <sstream>
@@ -967,34 +966,12 @@ void cmLocalVisualStudio7Generator::OutputBuildTool(
     static_cast<cmGlobalVisualStudio7Generator*>(this->GlobalGenerator);
   std::string temp;
   std::string extraLinkOptions;
-  if (target->GetType() == cmStateEnums::EXECUTABLE) {
-    this->AddConfigVariableFlags(extraLinkOptions, "CMAKE_EXE_LINKER_FLAGS",
-                                 target, cmBuildStep::Link, linkLanguage,
+  this->AddTargetTypeLinkerFlags(extraLinkOptions, target, linkLanguage,
                                  configName);
-  }
-  if (target->GetType() == cmStateEnums::SHARED_LIBRARY) {
-    this->AddConfigVariableFlags(extraLinkOptions, "CMAKE_SHARED_LINKER_FLAGS",
-                                 target, cmBuildStep::Link, linkLanguage,
-                                 configName);
-  }
-  if (target->GetType() == cmStateEnums::MODULE_LIBRARY) {
-    this->AddConfigVariableFlags(extraLinkOptions, "CMAKE_MODULE_LINKER_FLAGS",
-                                 target, cmBuildStep::Link, linkLanguage,
-                                 configName);
-  }
+  this->AddPerLanguageLinkFlags(extraLinkOptions, target, linkLanguage,
+                                configName);
 
-  cmValue targetLinkFlags = target->GetProperty("LINK_FLAGS");
-  if (targetLinkFlags) {
-    extraLinkOptions += ' ';
-    extraLinkOptions += *targetLinkFlags;
-  }
-  std::string configTypeUpper = cmSystemTools::UpperCase(configName);
-  std::string linkFlagsConfig = cmStrCat("LINK_FLAGS_", configTypeUpper);
-  targetLinkFlags = target->GetProperty(linkFlagsConfig);
-  if (targetLinkFlags) {
-    extraLinkOptions += ' ';
-    extraLinkOptions += *targetLinkFlags;
-  }
+  this->AddTargetPropertyLinkFlags(extraLinkOptions, target, configName);
 
   std::vector<std::string> opts;
   target->GetLinkOptions(opts, configName,
@@ -1406,11 +1383,10 @@ void cmLocalVisualStudio7Generator::WriteVCProjFile(std::ostream& fout,
   std::vector<std::string> configs =
     this->Makefile->GetGeneratorConfigs(cmMakefile::ExcludeEmptyConfig);
 
-  // We may be modifying the source groups temporarily, so make a copy.
-  std::vector<cmSourceGroup> sourceGroups = this->Makefile->GetSourceGroups();
-
   AllConfigSources sources;
   sources.Sources = target->GetAllConfigSources();
+
+  cmSourceGroupFiles sourceGroupFiles;
 
   // Add CMakeLists.txt file with rule to re-run CMake for user convenience.
   if (target->GetType() != cmStateEnums::GLOBAL_TARGET &&
@@ -1449,22 +1425,21 @@ void cmLocalVisualStudio7Generator::WriteVCProjFile(std::ostream& fout,
       }
     }
     // Add the file to the list of sources.
-    std::string const source = sf->GetFullPath();
-    cmSourceGroup* sourceGroup =
-      this->Makefile->FindSourceGroup(source, sourceGroups);
-    sourceGroup->AssignSource(sf);
+    sourceGroupFiles.Add(this->FindSourceGroup(sf->GetFullPath()), sf);
   }
 
   // open the project
-  this->WriteProjectStart(fout, libName, target, sourceGroups);
+  this->WriteProjectStart(fout, libName, target);
   // write the configuration information
   this->WriteConfigurations(fout, configs, libName, target);
 
   fout << "\t<Files>\n";
 
   // Loop through every source group.
+  SourceGroupVector const& sourceGroups = this->Makefile->GetSourceGroups();
   for (auto const& sg : sourceGroups) {
-    this->WriteGroup(&sg, target, fout, libName, configs, sources);
+    this->WriteGroup(sg.get(), target, fout, libName, configs, sources,
+                     sourceGroupFiles);
   }
 
   fout << "\t</Files>\n";
@@ -1511,8 +1486,8 @@ cmLocalVisualStudio7GeneratorFCInfo::cmLocalVisualStudio7GeneratorFCInfo(
     std::string configUpper = cmSystemTools::UpperCase(config);
     cmLVS7GFileConfig fc;
 
-    std::string lang =
-      lg->GlobalGenerator->GetLanguageFromExtension(sf.GetExtension().c_str());
+    std::string lang = std::string(
+      lg->GlobalGenerator->GetLanguageFromExtension(sf.GetExtension()));
     std::string const& sourceLang = lg->GetSourceFileLanguage(sf);
     bool needForceLang = false;
     // source file does not match its extension language
@@ -1674,18 +1649,20 @@ std::string cmLocalVisualStudio7Generator::ComputeLongestObjectDirectory(
 bool cmLocalVisualStudio7Generator::WriteGroup(
   cmSourceGroup const* sg, cmGeneratorTarget* target, std::ostream& fout,
   std::string const& libName, std::vector<std::string> const& configs,
-  AllConfigSources const& sources)
+  AllConfigSources const& sources, cmSourceGroupFiles const& sourceGroupFiles)
 {
   cmGlobalVisualStudio7Generator* gg =
     static_cast<cmGlobalVisualStudio7Generator*>(this->GlobalGenerator);
-  std::vector<cmSourceFile const*> const& sourceFiles = sg->GetSourceFiles();
-  std::vector<cmSourceGroup> const& children = sg->GetGroupChildren();
+  std::vector<cmSourceFile const*> const& sourceFiles =
+    sourceGroupFiles.GetSourceFiles(sg);
+  SourceGroupVector const& children = sg->GetGroupChildren();
 
   // Write the children to temporary output.
   bool hasChildrenWithSources = false;
   std::ostringstream tmpOut;
   for (auto const& child : children) {
-    if (this->WriteGroup(&child, target, tmpOut, libName, configs, sources)) {
+    if (this->WriteGroup(child.get(), target, tmpOut, libName, configs,
+                         sources, sourceGroupFiles)) {
       hasChildrenWithSources = true;
     }
   }
@@ -1705,17 +1682,19 @@ bool cmLocalVisualStudio7Generator::WriteGroup(
 
   // Loop through each source in the source group.
   for (cmSourceFile const* sf : sourceFiles) {
+    // We only need source group members that are part of this target.
+    auto si = sources.Index.find(sf);
+    if (si == sources.Index.end()) {
+      continue;
+    }
+
     std::string source = sf->GetFullPath();
 
     if (source != libName || target->GetType() == cmStateEnums::UTILITY ||
         target->GetType() == cmStateEnums::GLOBAL_TARGET ||
         target->GetType() == cmStateEnums::INTERFACE_LIBRARY) {
-      // Look up the source kind and configs.
-      auto map_it = sources.Index.find(sf);
-      // The map entry must exist because we populated it earlier.
-      assert(map_it != sources.Index.end());
       cmGeneratorTarget::AllConfigSource const& acs =
-        sources.Sources[map_it->second];
+        sources.Sources[si->second];
 
       FCInfo fcinfo(this, target, acs, configs);
 
@@ -2057,8 +2036,7 @@ void cmLocalVisualStudio7Generator::WriteProjectStartFortran(
 }
 
 void cmLocalVisualStudio7Generator::WriteProjectStart(
-  std::ostream& fout, std::string const& libName, cmGeneratorTarget* target,
-  std::vector<cmSourceGroup>&)
+  std::ostream& fout, std::string const& libName, cmGeneratorTarget* target)
 {
   if (this->FortranProject) {
     this->WriteProjectStartFortran(fout, libName, target);

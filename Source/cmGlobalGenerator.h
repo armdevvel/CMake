@@ -5,6 +5,7 @@
 #include "cmConfigure.h" // IWYU pragma: keep
 
 #include <cstddef>
+#include <functional>
 #include <iosfwd>
 #include <map>
 #include <memory>
@@ -45,6 +46,7 @@
 enum class cmDepfileFormat;
 enum class codecvt_Encoding;
 
+class cmBuildArgs;
 class cmDirectoryId;
 class cmExportBuildFileGenerator;
 class cmExternalMakefileProjectGenerator;
@@ -247,10 +249,9 @@ public:
    * Try running cmake and building a file. This is used for dynamically
    * loaded commands, not as part of the usual build process.
    */
-  int TryCompile(int jobs, std::string const& srcdir,
-                 std::string const& bindir, std::string const& projectName,
-                 std::string const& targetName, bool fast, std::string& output,
-                 cmMakefile* mf);
+  int TryCompile(int jobs, std::string const& bindir,
+                 std::string const& projectName, std::string const& targetName,
+                 bool fast, std::string& output, cmMakefile* mf);
 
   /**
    * Build a file given the following information. This is a more direct call
@@ -259,11 +260,9 @@ public:
    * done first.
    */
   int Build(
-    int jobs, std::string const& srcdir, std::string const& bindir,
-    std::string const& projectName,
-    std::vector<std::string> const& targetNames, std::ostream& ostr,
-    std::string const& makeProgram, std::string const& config,
-    cmBuildOptions buildOptions, bool verbose, cmDuration timeout,
+    cmBuildArgs const& buildArgs, std::vector<std::string> const& targetNames,
+    std::ostream& ostr, std::string const& makeProgram,
+    std::string const& config, cmBuildOptions buildOptions, cmDuration timeout,
     cmSystemTools::OutputOption outputMode,
     std::vector<std::string> const& nativeOptions = std::vector<std::string>(),
     BuildTryCompile isInTryCompile = BuildTryCompile::No);
@@ -361,9 +360,9 @@ public:
   bool GetToolSupportsColor() const { return this->ToolSupportsColor; }
 
   //! return the language for the given extension
-  std::string GetLanguageFromExtension(char const* ext) const;
+  cm::string_view GetLanguageFromExtension(cm::string_view ext) const;
   //! is an extension to be ignored
-  bool IgnoreFile(char const* ext) const;
+  bool IgnoreFile(cm::string_view ext) const;
   //! What is the preference for linkers and this language (None or Preferred)
   int GetLinkerPreference(std::string const& lang) const;
   //! What is the object file extension for a given source file?
@@ -716,6 +715,8 @@ public:
     return configs;
   }
 
+  bool ShouldWarnCMP0210(std::string const& lang);
+
   bool ShouldWarnExperimental(cm::string_view featureName,
                               cm::string_view featureUuid);
 
@@ -874,7 +875,11 @@ private:
   std::set<std::string> LanguagesInProgress;
   std::map<std::string, std::string> OutputExtensions;
   std::map<std::string, std::string> LanguageToOutputExtension;
+#if __cplusplus >= 201402L || defined(_MSVC_LANG) && _MSVC_LANG >= 201402L
+  std::map<std::string, std::string, std::less<void>> ExtensionToLanguage;
+#else
   std::map<std::string, std::string> ExtensionToLanguage;
+#endif
   std::map<std::string, int> LanguageToLinkerPreference;
 
 #if !defined(CMAKE_BOOTSTRAP)
@@ -963,6 +968,8 @@ private:
 
   // track targets to issue CMP0068 warning for.
   std::set<std::string> CMP0068WarnTargets;
+
+  std::unordered_set<std::string> WarnedCMP0210Languages;
 
   std::unordered_set<std::string> WarnedExperimental;
 

@@ -23,6 +23,7 @@ class cmLocalVisualStudio7GeneratorInternals;
 class cmMakefile;
 class cmSourceFile;
 class cmSourceGroup;
+class cmSourceGroupFiles;
 
 class cmVS7GeneratorOptions : public cmVisualStudioGeneratorOptions
 {
@@ -130,8 +131,7 @@ private:
                                 std::vector<std::string> const& dirs);
   void WriteProjectSCC(std::ostream& fout, cmGeneratorTarget* target);
   void WriteProjectStart(std::ostream& fout, std::string const& libName,
-                         cmGeneratorTarget* tgt,
-                         std::vector<cmSourceGroup>& sgs);
+                         cmGeneratorTarget* target);
   void WriteProjectStartFortran(std::ostream& fout, std::string const& libName,
                                 cmGeneratorTarget* tgt);
   void WriteVCProjBeginGroup(std::ostream& fout, char const* group,
@@ -148,7 +148,8 @@ private:
   bool WriteGroup(cmSourceGroup const* sg, cmGeneratorTarget* target,
                   std::ostream& fout, std::string const& libName,
                   std::vector<std::string> const& configs,
-                  AllConfigSources const& sources);
+                  AllConfigSources const& sources,
+                  cmSourceGroupFiles const& sourceGroupFiles);
 
   friend class cmLocalVisualStudio7GeneratorFCInfo;
   friend class cmLocalVisualStudio7GeneratorInternals;

@@ -70,9 +70,16 @@ enabled:
 :variable:`CMAKE_<LANG>_COMPILER_VERSION`
   The version of the compiler.
 :variable:`CMAKE_<LANG>_FLAGS`
-  The variables and the configuration-specific equivalents contain flags that
-  will be added to the compile command when compiling a file of a particular
-  language.
+  These variables and the configuration-specific equivalents contain flags that
+  will be added to all invocations of the compiler for a particular language,
+  including those driving compiling and linking.
+
+:variable:`CMAKE_<LANG>_LINK_FLAGS`
+  .. versionadded:: 4.3
+
+  These variables and the configuration-specific equivalents contain flags that
+  will be added to all invocations of the compiler for a particular language
+  when driving linking only.
 
 CMake needs a way to determine which compiler to use to invoke the linker.
 This is determined by the :prop_sf:`LANGUAGE` property of source files of the
@@ -234,11 +241,11 @@ value to those supported compilers when compiling:
 
   set(CMAKE_SYSTEM_NAME QNX)
 
-  set(arch gcc_ntoarmv7le)
+  set(arch gcc_ntoaarch64)
 
   set(CMAKE_C_COMPILER qcc)
   set(CMAKE_C_COMPILER_TARGET ${arch})
-  set(CMAKE_CXX_COMPILER QCC)
+  set(CMAKE_CXX_COMPILER q++)
   set(CMAKE_CXX_COMPILER_TARGET ${arch})
 
   set(CMAKE_SYSROOT $ENV{QNX_TARGET})

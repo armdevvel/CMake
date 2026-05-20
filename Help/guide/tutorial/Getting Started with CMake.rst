@@ -430,7 +430,7 @@ We should be able to see our library created alongside the Tutorial executable.
 Solution
 --------
 
-We start by adding the library target in the same manner as the the Tutorial
+We start by adding the library target in the same manner as the Tutorial
 executable.
 
 .. raw:: html
@@ -449,7 +449,7 @@ executable.
   </details>
 
 Next we need to describe the source files. For the implementation file,
-``MathFunctions.cxx``, this is straight-forward; for the header file
+``MathFunctions.cxx``, this is straightforward; for the header file
 ``MathFunctions.h`` we will need to use a ``FILE_SET``.
 
 We can either give this ``FILE_SET`` its own name, or use the shortcut of naming

@@ -14,6 +14,8 @@ run_cmake(AppendNoArgs)
 run_cmake(Prepend)
 run_cmake(PrependNoArgs)
 
+run_cmake_script(CaseUTF-8)
+
 run_cmake(Concat)
 run_cmake(ConcatNoArgs)
 
@@ -40,6 +42,7 @@ run_cmake(UuidMissingNameValue)
 run_cmake(UuidMissingTypeValue)
 run_cmake(UuidBadType)
 
+run_cmake(RegexMatch)
 run_cmake(RegexClear)
 run_cmake(RegexMultiMatchClear)
 run_cmake(RegexEmptyMatch)

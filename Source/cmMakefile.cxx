@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -28,6 +27,7 @@
 
 #include "cmsys/FStream.hxx"
 #include "cmsys/RegularExpression.hxx"
+#include "cmsys/String.h"
 
 #include "cmCustomCommand.h"
 #include "cmCustomCommandLines.h"
@@ -51,7 +51,6 @@
 #include "cmSourceFile.h"
 #include "cmSourceFileLocation.h"
 #include "cmSourceGroup.h"
-#include "cmStack.h"
 #include "cmState.h"
 #include "cmStateDirectory.h"
 #include "cmStateTypes.h"
@@ -195,7 +194,8 @@ cmMakefile::cmMakefile(cmGlobalGenerator* globalGenerator,
   this->AddSourceGroup("Object Files", "\\.(lo|o|obj)$");
 
   this->ObjectLibrariesSourceGroupIndex = this->SourceGroups.size();
-  this->SourceGroups.emplace_back("Object Libraries", "^MATCH_NO_SOURCES$");
+  this->SourceGroups.emplace_back(
+    cm::make_unique<cmSourceGroup>("Object Libraries", "^MATCH_NO_SOURCES$"));
 #endif
 }
 
@@ -339,14 +339,15 @@ void cmMakefile::PrintCommandTrace(cmListFileFunction const& lff,
   std::vector<std::string> const& trace_only_this_files =
     this->GetCMakeInstance()->GetTraceSources();
   std::string const& full_path = bt.Top().FilePath;
-  std::string const& only_filename = cmSystemTools::GetFilenameName(full_path);
+  cm::string_view only_filename =
+    cmSystemTools::GetFilenameNameView(full_path);
   bool trace = trace_only_this_files.empty();
   if (!trace) {
     for (std::string const& file : trace_only_this_files) {
       std::string::size_type const pos = full_path.rfind(file);
       trace = (pos != std::string::npos) &&
         ((pos + file.size()) == full_path.size()) &&
-        (only_filename == cmSystemTools::GetFilenameName(file));
+        (only_filename == cmSystemTools::GetFilenameNameView(file));
       if (trace) {
         break;
       }
@@ -586,7 +587,7 @@ bool cmMakefile::ExecuteCommand(cmListFileFunction const& lff,
         }
       }
       if (this->GetCMakeInstance()->HasScriptModeExitCode() &&
-          this->GetCMakeInstance()->GetWorkingMode() == cmake::SCRIPT_MODE) {
+          this->GetCMakeInstance()->RoleSupportsExitCode()) {
         // pass-through the exit code from inner cmake_language(EXIT) ,
         // possibly from include() or similar command...
         status.SetExitCode(this->GetCMakeInstance()->GetScriptModeExitCode());
@@ -1297,8 +1298,8 @@ static void s_RemoveDefineFlag(std::string const& flag, std::string& dflags)
   for (std::string::size_type lpos = dflags.find(flag, 0);
        lpos != std::string::npos; lpos = dflags.find(flag, lpos)) {
     std::string::size_type rpos = lpos + len;
-    if ((lpos <= 0 || cmIsSpace(dflags[lpos - 1])) &&
-        (rpos >= dflags.size() || cmIsSpace(dflags[rpos]))) {
+    if ((lpos <= 0 || cmsysString_isspace(dflags[lpos - 1])) &&
+        (rpos >= dflags.size() || cmsysString_isspace(dflags[rpos]))) {
       dflags.erase(lpos, len);
     } else {
       ++lpos;
@@ -1427,6 +1428,16 @@ void cmMakefile::AddTestGenerator(std::unique_ptr<cmTestGenerator> g)
   if (g) {
     this->TestGenerators.push_back(std::move(g));
   }
+}
+
+bool cmMakefile::ExplicitlyGeneratesSbom() const
+{
+  return this->ExplicitSbomGenerator;
+}
+
+void cmMakefile::SetExplicitlyGeneratesSbom(bool status)
+{
+  this->ExplicitSbomGenerator = status;
 }
 
 void cmMakefile::PushFunctionScope(std::string const& fileName,
@@ -2082,16 +2093,24 @@ namespace {
 }
 
 #if !defined(CMAKE_BOOTSTRAP)
+
+void cmMakefile::ResolveSourceGroupGenex(cmLocalGenerator* lg)
+{
+  for (auto const& sourceGroup : this->SourceGroups) {
+    sourceGroup->ResolveGenex(lg, {});
+  }
+}
+
 cmSourceGroup* cmMakefile::GetSourceGroup(
   std::vector<std::string> const& name) const
 {
   cmSourceGroup* sg = nullptr;
 
   // first look for source group starting with the same as the one we want
-  for (cmSourceGroup const& srcGroup : this->SourceGroups) {
-    std::string const& sgName = srcGroup.GetName();
+  for (auto const& srcGroup : this->SourceGroups) {
+    std::string const& sgName = srcGroup->GetName();
     if (sgName == name[0]) {
-      sg = const_cast<cmSourceGroup*>(&srcGroup);
+      sg = srcGroup.get();
       break;
     }
   }
@@ -2143,7 +2162,8 @@ void cmMakefile::AddSourceGroup(std::vector<std::string> const& name,
   if (i == -1) {
     // group does not exist nor belong to any existing group
     // add its first component
-    this->SourceGroups.emplace_back(name[0], regex);
+    this->SourceGroups.emplace_back(
+      cm::make_unique<cmSourceGroup>(name[0], regex));
     sg = this->GetSourceGroup(currentName);
     i = 0; // last component found
   }
@@ -2153,7 +2173,8 @@ void cmMakefile::AddSourceGroup(std::vector<std::string> const& name,
   }
   // build the whole source group path
   for (++i; i <= lastElement; ++i) {
-    sg->AddChild(cmSourceGroup(name[i], nullptr, sg->GetFullName().c_str()));
+    sg->AddChild(cm::make_unique<cmSourceGroup>(name[i], nullptr,
+                                                sg->GetFullName().c_str()));
     sg = sg->LookupChild(name[i]);
   }
 
@@ -2176,36 +2197,6 @@ cmSourceGroup* cmMakefile::GetOrCreateSourceGroup(std::string const& name)
   auto p = this->GetDefinition("SOURCE_GROUP_DELIMITER");
   return this->GetOrCreateSourceGroup(
     cmTokenize(name, p ? cm::string_view(*p) : R"(\/)"_s));
-}
-
-/**
- * Find a source group whose regular expression matches the filename
- * part of the given source name.  Search backward through the list of
- * source groups, and take the first matching group found.  This way
- * non-inherited SOURCE_GROUP commands will have precedence over
- * inherited ones.
- */
-cmSourceGroup* cmMakefile::FindSourceGroup(
-  std::string const& source, std::vector<cmSourceGroup>& groups) const
-{
-  // First search for a group that lists the file explicitly.
-  for (auto sg = groups.rbegin(); sg != groups.rend(); ++sg) {
-    cmSourceGroup* result = sg->MatchChildrenFiles(source);
-    if (result) {
-      return result;
-    }
-  }
-
-  // Now search for a group whose regex matches the file.
-  for (auto sg = groups.rbegin(); sg != groups.rend(); ++sg) {
-    cmSourceGroup* result = sg->MatchChildrenRegex(source);
-    if (result) {
-      return result;
-    }
-  }
-
-  // Shouldn't get here, but just in case, return the default group.
-  return groups.data();
 }
 #endif
 
@@ -2713,7 +2704,7 @@ MessageType cmMakefile::ExpandVariablesInStringImpl(
             last = next + 1;
           } else if (nextc == ';' && openstack.empty()) {
             // Handled in ExpandListArgument; pass the backslash literally.
-          } else if (isalnum(nextc) || nextc == '\0') {
+          } else if (cmsysString_isalnum(nextc) || nextc == '\0') {
             errorstr += "Invalid character escape '\\";
             if (nextc) {
               errorstr += nextc;
@@ -2781,8 +2772,8 @@ MessageType cmMakefile::ExpandVariablesInStringImpl(
         CM_FALLTHROUGH;
       default: {
         if (!openstack.empty() &&
-            !(isalnum(inc) || inc == '_' || inc == '/' || inc == '.' ||
-              inc == '+' || inc == '-')) {
+            !(cmsysString_isalnum(inc) || inc == '_' || inc == '/' ||
+              inc == '.' || inc == '+' || inc == '-')) {
           errorstr += cmStrCat("Invalid character ('", inc);
           result.append(last, in - last);
           errorstr += cmStrCat("') in a variable name: '",
@@ -3156,7 +3147,7 @@ void cmMakefile::AddTargetObject(std::string const& tgtName,
   // file that compiles to it. Needs a policy as it likely affects link
   // language selection if done unconditionally.
 #if !defined(CMAKE_BOOTSTRAP)
-  this->SourceGroups[this->ObjectLibrariesSourceGroupIndex].AddGroupFile(
+  this->SourceGroups[this->ObjectLibrariesSourceGroupIndex]->AddGroupFile(
     sf->ResolveFullPath());
 #endif
 }
@@ -3252,8 +3243,7 @@ int cmMakefile::TryCompile(std::string const& srcdir,
   // make sure the same generator is used
   // use this program as the cmake to be run, it should not
   // be run that way but the cmake object requires a valid path
-  cmake cm(cmake::RoleProject, cmState::Project,
-           cmState::ProjectKind::TryCompile);
+  cmake cm(cmState::Role::Project, cmState::TryCompile::Yes);
   auto gg = cm.CreateGlobalGenerator(this->GetGlobalGenerator()->GetName());
   if (!gg) {
     this->IssueMessage(MessageType::INTERNAL_ERROR,
@@ -3350,7 +3340,7 @@ int cmMakefile::TryCompile(std::string const& srcdir,
 
   // finally call the generator to actually build the resulting project
   int ret = this->GetGlobalGenerator()->TryCompile(
-    jobs, srcdir, bindir, projectName, targetName, fast, output, this);
+    jobs, bindir, projectName, targetName, fast, output, this);
 
   this->IsSourceFileTryCompile = false;
   return ret;
@@ -3379,8 +3369,7 @@ cmGlobalGenerator* cmMakefile::GetGlobalGenerator() const
 #ifndef CMAKE_BOOTSTRAP
 cmVariableWatch* cmMakefile::GetVariableWatch() const
 {
-  if (this->GetCMakeInstance() &&
-      this->GetCMakeInstance()->GetVariableWatch()) {
+  if (this->GetCMakeInstance()) {
     return this->GetCMakeInstance()->GetVariableWatch();
   }
   return nullptr;
@@ -3395,8 +3384,8 @@ cmState* cmMakefile::GetState() const
 void cmMakefile::DisplayStatus(std::string const& message, float s) const
 {
   cmake* cm = this->GetCMakeInstance();
-  if (cm->GetWorkingMode() == cmake::FIND_PACKAGE_MODE) {
-    // don't output any STATUS message in FIND_PACKAGE_MODE, since they will
+  if (cm->GetState()->GetRole() == cmState::Role::FindPackage) {
+    // don't output any STATUS message in --find-package mode, since they will
     // directly be fed to the compiler, which will be confused.
     return;
   }
@@ -4105,7 +4094,7 @@ bool cmMakefile::SetPolicy(cmPolicies::PolicyID id,
   }
 
   // Deprecate old policies.
-  if (status == cmPolicies::OLD && id <= cmPolicies::CMP0143 &&
+  if (status == cmPolicies::OLD && id <= cmPolicies::CMP0151 &&
       !(this->GetCMakeInstance()->GetIsInTryCompile() &&
         (
           // Policies set by cmCoreTryCompile::TryCompileCode.
@@ -4122,7 +4111,9 @@ bool cmMakefile::SetPolicy(cmPolicies::PolicyID id,
   this->StateSnapshot.SetPolicy(id, status);
 
   // Handle CMAKE_PARENT_LIST_FILE for CMP0198 policy changes
-  if (id == cmPolicies::CMP0198) {
+  if (id == cmPolicies::CMP0198 &&
+      this->GetCMakeInstance()->GetState()->GetRole() ==
+        cmState::Role::Project) {
     this->UpdateParentListFileVariable();
   }
 
@@ -4242,47 +4233,45 @@ cmMakefile::MacroPushPop::~MacroPushPop()
   this->Makefile->PopMacroScope(this->ReportError);
 }
 
-cmFindPackageStackRAII::cmFindPackageStackRAII(cmMakefile* mf,
-                                               std::string const& name)
+cmMakefile::FindPackageStackRAII::FindPackageStackRAII(
+  cmMakefile* mf, std::string const& name,
+  std::shared_ptr<cmPackageInformation const> pkgInfo)
   : Makefile(mf)
 {
   this->Makefile->FindPackageStack =
     this->Makefile->FindPackageStack.Push(cmFindPackageCall{
       name,
-      cmPackageInformation(),
+      std::move(pkgInfo),
       this->Makefile->FindPackageStackNextIndex,
     });
   this->Makefile->FindPackageStackNextIndex++;
 }
 
-void cmFindPackageStackRAII::BindTop(cmPackageInformation*& value)
+cmMakefile::FindPackageStackRAII::~FindPackageStackRAII()
 {
-  if (this->Value) {
-    *this->Value = nullptr;
-  }
-  this->Value = &value;
-  value = &this->Makefile->FindPackageStack.cmStack::Top().PackageInfo;
-}
-
-cmFindPackageStackRAII::~cmFindPackageStackRAII()
-{
-  if (this->Value) {
-    *this->Value = nullptr;
-  }
-
   this->Makefile->FindPackageStackNextIndex =
     this->Makefile->FindPackageStack.Top().Index + 1;
   this->Makefile->FindPackageStack = this->Makefile->FindPackageStack.Pop();
 
   if (!this->Makefile->FindPackageStack.Empty()) {
-    auto top = this->Makefile->FindPackageStack.Top();
+    // We have just finished an inner package found as a dependency of an
+    // outer package.  Targets created in the outer package after this
+    // point may depend on the inner package, so if they are exported,
+    // their find_dependency call for the outer package should be
+    // ordered after the find_dependency call for the inner package.
+    //
+    // Any targets created by the outer package before the inner package
+    // was loaded will have already saved a copy of the outer package
+    // stack with its original index.  Replace the top entry with a new
+    // one representing the same outer package with a new index.
+    cmFindPackageCall outer = this->Makefile->FindPackageStack.Top();
     this->Makefile->FindPackageStack = this->Makefile->FindPackageStack.Pop();
 
-    top.Index = this->Makefile->FindPackageStackNextIndex;
+    outer.Index = this->Makefile->FindPackageStackNextIndex;
     this->Makefile->FindPackageStackNextIndex++;
 
     this->Makefile->FindPackageStack =
-      this->Makefile->FindPackageStack.Push(top);
+      this->Makefile->FindPackageStack.Push(outer);
   }
 }
 

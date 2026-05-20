@@ -9,8 +9,8 @@ library target.
 .. code-block:: cmake
 
   target_link_options(<target> [BEFORE]
-    <INTERFACE|PUBLIC|PRIVATE> [items1...]
-    [<INTERFACE|PUBLIC|PRIVATE> [items2...] ...])
+    {INTERFACE|PUBLIC|PRIVATE} <item>...
+    [{INTERFACE|PUBLIC|PRIVATE} <item>...]...)
 
 The named ``<target>`` must have been created by a command such as
 :command:`add_executable` or :command:`add_library` and must not be an
@@ -66,6 +66,11 @@ See Also
 * :variable:`CMAKE_<LANG>_FLAGS` and :variable:`CMAKE_<LANG>_FLAGS_<CONFIG>`
   add language-wide flags passed to all invocations of the compiler.
   This includes invocations that drive compiling and those that drive linking.
+
+* .. versionadded:: 4.3
+    :variable:`CMAKE_<LANG>_LINK_FLAGS` and
+    :variable:`CMAKE_<LANG>_LINK_FLAGS_<CONFIG>` add language-wide flags passed
+    to all invocations of the compiler which drive linking.
 
 * The :module:`CheckLinkerFlag` module to check whether a linker flag is
   supported by the compiler.

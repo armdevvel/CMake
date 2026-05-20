@@ -26,14 +26,32 @@ foreach(file ${CHECK_FILES})
   configure_file(${CMAKE_CURRENT_LIST_FILE} ${FULL_COMPRESS_DIR}/${file} COPYONLY)
 endforeach()
 
-if(UNIX)
-  execute_process(COMMAND ln -sf f1.txt ${FULL_COMPRESS_DIR}/d1/f2.txt)
+# Test a (file) symlink inside the archive on platforms which support it.
+execute_process(
+  COMMAND ${CMAKE_COMMAND} -E create_symlink f1.txt ${FULL_COMPRESS_DIR}/d1/f2.txt
+  OUTPUT_VARIABLE create_symlink_stdout
+  ERROR_VARIABLE create_symlink_stderr
+  RESULT_VARIABLE create_symlink_result
+)
+if(create_symlink_result EQUAL 0 AND EXISTS "${FULL_COMPRESS_DIR}/d1/f2.txt")
   list(APPEND CHECK_FILES "d1/f2.txt")
 endif()
 
 file(REMOVE ${FULL_OUTPUT_NAME})
 file(REMOVE_RECURSE ${FULL_DECOMPRESS_DIR})
-file(MAKE_DIRECTORY ${FULL_DECOMPRESS_DIR})
+if(DESTINATION_SYMLINK)
+  # If specified, test extraction to a directory symlink on platforms which
+  # support it, but fall back to a plain directory otherwise.
+  cmake_policy(SET CMP0205 NEW)
+  file(MAKE_DIRECTORY ${FULL_DECOMPRESS_DIR}-dir)
+  file(CREATE_LINK
+    ${FULL_DECOMPRESS_DIR}-dir ${FULL_DECOMPRESS_DIR}
+    COPY_ON_ERROR
+    SYMBOLIC
+  )
+else()
+  file(MAKE_DIRECTORY ${FULL_DECOMPRESS_DIR})
+endif()
 
 file(ARCHIVE_CREATE
   OUTPUT ${FULL_OUTPUT_NAME}
@@ -94,21 +112,4 @@ function(check_magic EXPECTED)
     message(FATAL_ERROR
       "Actual [${ACTUAL}] does not match expected [${EXPECTED}]")
   endif()
-endfunction()
-
-
-function(check_compression_level COMPRESSION_LEVEL)
-  file(ARCHIVE_CREATE
-    OUTPUT "${FULL_OUTPUT_NAME}_compression_level"
-    FORMAT "${ARCHIVE_FORMAT}"
-    COMPRESSION_LEVEL ${COMPRESSION_LEVEL}
-    COMPRESSION "${COMPRESSION_TYPE}"
-    VERBOSE
-    PATHS ${COMPRESS_DIR})
-
-  file(ARCHIVE_EXTRACT
-    INPUT "${FULL_OUTPUT_NAME}_compression_level"
-    ${DECOMPRESSION_OPTIONS}
-    DESTINATION ${FULL_DECOMPRESS_DIR}
-    VERBOSE)
 endfunction()

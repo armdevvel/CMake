@@ -40,6 +40,10 @@
 // will not compile without the complete type.
 #include "cmTarget.h" // IWYU pragma: keep
 
+#if !defined(CMAKE_BOOTSTRAP)
+#  include "cmSourceGroup.h"
+#endif
+
 enum class cmCustomCommandType;
 enum class cmObjectLibraryCommands;
 
@@ -59,10 +63,6 @@ class cmTest;
 class cmTestGenerator;
 class cmVariableWatch;
 class cmake;
-
-#if !defined(CMAKE_BOOTSTRAP)
-class cmSourceGroup;
-#endif
 
 /** A type-safe wrapper for a string representing a directory id.  */
 class cmDirectoryId
@@ -612,10 +612,16 @@ public:
   bool CanIWriteThisFile(std::string const& fileName) const;
 
 #if !defined(CMAKE_BOOTSTRAP)
+
+  /**
+   * Resolve source group genex.
+   */
+  void ResolveSourceGroupGenex(cmLocalGenerator* lg);
+
   /**
    * Get the vector source groups.
    */
-  std::vector<cmSourceGroup> const& GetSourceGroups() const
+  SourceGroupVector const& GetSourceGroups() const
   {
     return this->SourceGroups;
   }
@@ -648,12 +654,6 @@ public:
    * The name will be tokenized.
    */
   cmSourceGroup* GetOrCreateSourceGroup(std::string const& name);
-
-  /**
-   * find what source group this source is in
-   */
-  cmSourceGroup* FindSourceGroup(std::string const& source,
-                                 std::vector<cmSourceGroup>& groups) const;
 #endif
 
   /**
@@ -854,6 +854,9 @@ public:
   //! Initialize a makefile from its parent
   void InitializeFromParent(cmMakefile* parent);
 
+  bool ExplicitlyGeneratesSbom() const;
+  void SetExplicitlyGeneratesSbom(bool status = true);
+
   void AddInstallGenerator(std::unique_ptr<cmInstallGenerator> g);
 
   std::vector<std::unique_ptr<cmInstallGenerator>>& GetInstallGenerators()
@@ -1034,7 +1037,21 @@ public:
   // searches
   std::deque<std::vector<std::string>> FindPackageRootPathStack;
 
-  friend class cmFindPackageStackRAII;
+  /**
+   * RAII type to manage the find_package call stack.
+   */
+  class FindPackageStackRAII
+  {
+    cmMakefile* Makefile;
+
+  public:
+    FindPackageStackRAII(cmMakefile* mf, std::string const& pkg,
+                         std::shared_ptr<cmPackageInformation const> pkgInfo);
+    ~FindPackageStackRAII();
+
+    FindPackageStackRAII(FindPackageStackRAII const&) = delete;
+    FindPackageStackRAII& operator=(FindPackageStackRAII const&) = delete;
+  };
 
   class DebugFindPkgRAII
   {
@@ -1131,7 +1148,7 @@ protected:
   std::string DefineFlags;
 
 #if !defined(CMAKE_BOOTSTRAP)
-  std::vector<cmSourceGroup> SourceGroups;
+  SourceGroupVector SourceGroups;
   size_t ObjectLibrariesSourceGroupIndex;
 #endif
 
@@ -1239,6 +1256,7 @@ private:
   cmFindPackageStack FindPackageStack;
   unsigned int FindPackageStackNextIndex = 0;
 
+  bool ExplicitSbomGenerator = false;
   bool DebugFindPkg = false;
 
   bool CheckSystemVars;

@@ -473,6 +473,7 @@ TargetProperty const StaticTargetProperties[] = {
   { "C_CPPCHECK"_s, IC::CanCompileSources },
   { "C_ICSTAT"_s, IC::CanCompileSources },
   { "C_INCLUDE_WHAT_YOU_USE"_s, IC::CanCompileSources },
+  { "C_PVS_STUDIO"_s, IC::CanCompileSources },
   // -- C++
   { "CXX_CLANG_TIDY"_s, IC::CanCompileSources },
   { "CXX_CLANG_TIDY_EXPORT_FIXES_DIR"_s, IC::CanCompileSources },
@@ -480,6 +481,7 @@ TargetProperty const StaticTargetProperties[] = {
   { "CXX_CPPCHECK"_s, IC::CanCompileSources },
   { "CXX_ICSTAT"_s, IC::CanCompileSources },
   { "CXX_INCLUDE_WHAT_YOU_USE"_s, IC::CanCompileSources },
+  { "CXX_PVS_STUDIO"_s, IC::CanCompileSources },
   // -- Objective C
   { "OBJC_CLANG_TIDY"_s, IC::CanCompileSources },
   { "OBJC_CLANG_TIDY_EXPORT_FIXES_DIR"_s, IC::CanCompileSources },
@@ -498,6 +500,7 @@ TargetProperty const StaticTargetProperties[] = {
   { "UNITY_BUILD_RELOCATABLE"_s, IC::CanCompileSources },
   { "OPTIMIZE_DEPENDENCIES"_s, IC::CanCompileSources },
   { "VERIFY_INTERFACE_HEADER_SETS"_s },
+  { "VERIFY_PRIVATE_HEADER_SETS"_s },
   // -- Android
   { "ANDROID_ANT_ADDITIONAL_OPTIONS"_s, IC::CanCompileSources },
   { "ANDROID_PROCESS_MAX"_s, IC::CanCompileSources },
@@ -1099,11 +1102,13 @@ cmTarget::cmTarget(std::string const& name, cmStateEnums::TargetType type,
   }
 
   for (auto const& prop : mf->GetState()->GetPropertyDefinitions().GetMap()) {
-    if (prop.first.second == cmProperty::TARGET &&
-        !prop.second.GetInitializeFromVariable().empty()) {
-      if (auto value =
-            mf->GetDefinition(prop.second.GetInitializeFromVariable())) {
-        this->SetProperty(prop.first.first, value);
+    auto iter = prop.second.find(cmProperty::TARGET);
+    if (iter != prop.second.end()) {
+      if (!iter->second.GetInitializeFromVariable().empty()) {
+        if (auto value =
+              mf->GetDefinition(iter->second.GetInitializeFromVariable())) {
+          this->SetProperty(prop.first, value);
+        }
       }
     }
   }
@@ -1809,6 +1814,7 @@ void cmTarget::CopyImportedCxxModulesProperties(cmTarget const* tgt)
     "CXX_CPPCHECK",
     "CXX_ICSTAT",
     "CXX_INCLUDE_WHAT_YOU_USE",
+    "CXX_PVS_STUDIO",
     "SKIP_LINTING",
 
     // Build graph properties
@@ -3145,8 +3151,7 @@ std::pair<cmFileSet*, bool> cmTarget::GetOrCreateFileSet(
   std::string const& name, std::string const& type, cmFileSetVisibility vis)
 {
   auto result = this->impl->FileSets.emplace(
-    name,
-    cmFileSet(*this->GetMakefile()->GetCMakeInstance(), name, type, vis));
+    name, cmFileSet(this->GetMakefile(), name, type, vis));
   if (result.second) {
     auto bt = this->impl->Makefile->GetBacktrace();
     if (type == this->impl->HeadersFileSets.TypeName) {

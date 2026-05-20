@@ -10,6 +10,8 @@
 #include <sstream>
 #include <utility>
 
+#include <cmext/string_view>
+
 #include "cmsys/RegularExpression.hxx"
 
 #include "cmGeneratedFileStream.h"
@@ -461,22 +463,24 @@ void cmExtraEclipseCDT4Generator::CreateProjectFile()
 }
 
 void cmExtraEclipseCDT4Generator::WriteGroups(
-  std::vector<cmSourceGroup> const& sourceGroups, std::string& linkName,
+  SourceGroupVector const& sourceGroups,
+  cmSourceGroupFiles const& sourceGroupFiles, std::string& linkName,
   cmXMLWriter& xml)
 {
-  for (cmSourceGroup const& sg : sourceGroups) {
-    std::string linkName3 = cmStrCat(linkName, '/', sg.GetFullName());
+  for (auto const& sg : sourceGroups) {
+    std::string linkName3 = cmStrCat(linkName, '/', sg->GetFullName());
 
     std::replace(linkName3.begin(), linkName3.end(), '\\', '/');
 
     cmExtraEclipseCDT4Generator::AppendLinkedResource(
       xml, linkName3, "virtual:/virtual", VirtualFolder);
-    std::vector<cmSourceGroup> const& children = sg.GetGroupChildren();
+    SourceGroupVector const& children = sg->GetGroupChildren();
     if (!children.empty()) {
-      this->WriteGroups(children, linkName, xml);
+      this->WriteGroups(children, sourceGroupFiles, linkName, xml);
     }
-    std::vector<cmSourceFile const*> sFiles = sg.GetSourceFiles();
-    for (cmSourceFile const* file : sFiles) {
+    std::vector<cmSourceFile const*> const& sourceFiles =
+      sourceGroupFiles.GetSourceFiles(sg.get());
+    for (cmSourceFile const* file : sourceFiles) {
       std::string const& fullPath = file->GetFullPath();
 
       if (!cmSystemTools::FileIsDirectory(fullPath)) {
@@ -518,21 +522,19 @@ void cmExtraEclipseCDT4Generator::CreateLinksForTargets(cmXMLWriter& xml)
           if (!this->GenerateLinkedResources) {
             break; // skip generating the linked resources to the source files
           }
-          std::vector<cmSourceGroup> sourceGroups =
-            makefile->GetSourceGroups();
           // get the files from the source lists then add them to the groups
+          cmSourceGroupFiles sourceGroupFiles;
           std::vector<cmSourceFile*> files;
           target->GetSourceFiles(
             files, makefile->GetSafeDefinition("CMAKE_BUILD_TYPE"));
           for (cmSourceFile* sf : files) {
             // Add the file to the list of sources.
-            std::string const& source = sf->ResolveFullPath();
-            cmSourceGroup* sourceGroup =
-              makefile->FindSourceGroup(source, sourceGroups);
-            sourceGroup->AssignSource(sf);
+            sourceGroupFiles.Add(lg->FindSourceGroup(sf->ResolveFullPath()),
+                                 sf);
           }
 
-          this->WriteGroups(sourceGroups, linkName2, xml);
+          this->WriteGroups(makefile->GetSourceGroups(), sourceGroupFiles,
+                            linkName2, xml);
         } break;
         // ignore all others:
         default:
@@ -739,7 +741,7 @@ void cmExtraEclipseCDT4Generator::CreateCProjectFile() const
     // - only if not named the same as an output directory
     if (!cmSystemTools::FileIsDirectory(
           cmStrCat(this->HomeOutputDirectory, '/', p))) {
-      excludeFromOut += p + "/|";
+      excludeFromOut = cmStrCat(std::move(excludeFromOut), p, "/|");
     }
   }
 
@@ -1080,7 +1082,7 @@ std::string cmExtraEclipseCDT4Generator::GetPathBasename(
 std::string cmExtraEclipseCDT4Generator::GenerateProjectName(
   std::string const& name, std::string const& type, std::string const& path)
 {
-  return name + (type.empty() ? "" : "-") + type + "@" + path;
+  return cmStrCat(name, (type.empty() ? ""_s : "-"_s), type, '@', path);
 }
 
 // Helper functions
