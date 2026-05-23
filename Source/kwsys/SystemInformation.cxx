@@ -4366,6 +4366,14 @@ long long SystemInformationImplementation::GetCyclesDifference(
   stamp1 = _ReadStatusReg(ARM64_PMCCNTR_EL0);
   DelayFunction(uiParameter);
   stamp2 = _ReadStatusReg(ARM64_PMCCNTR_EL0);
+#  elif defined _M_ARM
+  LARGE_INTEGER v1;
+  QueryPerformanceCounter(&v1);
+  stamp1 = (unsigned __int64)v1.QuadPart;
+  DelayFunction(uiParameter);
+  LARGE_INTEGER v2;
+  QueryPerformanceCounter(&v2);
+  stamp2 = (unsigned __int64)v2.QuadPart;
 #  else
   stamp1 = __rdtsc();
   DelayFunction(uiParameter);
