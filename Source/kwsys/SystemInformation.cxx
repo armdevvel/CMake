@@ -173,14 +173,14 @@ using ResourceLimitType = struct rlimit;
 #include <memory.h>
 
 #if defined(_MSC_VER) && (_MSC_VER >= 1300) && !defined(_WIN64) &&            \
-  !defined(__clang__)
+  !defined(__clang__) && !defined(_M_ARM)
 #  define USE_ASM_INSTRUCTIONS 1
 #else
 #  define USE_ASM_INSTRUCTIONS 0
 #endif
 
 #if defined(_MSC_VER) && (_MSC_VER >= 1400) && !defined(__clang__) &&         \
-  !defined(_M_ARM64)
+  !defined(_M_ARM64) && !defined(_M_ARM)
 #  include <intrin.h>
 #  define USE_CPUID_INTRINSICS 1
 #else
