@@ -173,14 +173,14 @@ using ResourceLimitType = struct rlimit;
 #include <memory.h>
 
 #if defined(_MSC_VER) && (_MSC_VER >= 1300) && !defined(_WIN64) &&            \
-  !defined(__clang__)
+  !defined(__clang__) && !defined(_M_ARM)
 #  define USE_ASM_INSTRUCTIONS 1
 #else
 #  define USE_ASM_INSTRUCTIONS 0
 #endif
 
 #if defined(_MSC_VER) && (_MSC_VER >= 1400) && !defined(__clang__) &&         \
-  !defined(_M_ARM64)
+  !defined(_M_ARM64) && !defined(_M_ARM)
 #  include <intrin.h>
 #  define USE_CPUID_INTRINSICS 1
 #else
@@ -4366,6 +4366,14 @@ long long SystemInformationImplementation::GetCyclesDifference(
   stamp1 = _ReadStatusReg(ARM64_PMCCNTR_EL0);
   DelayFunction(uiParameter);
   stamp2 = _ReadStatusReg(ARM64_PMCCNTR_EL0);
+#  elif defined _M_ARM
+  LARGE_INTEGER v1;
+  QueryPerformanceCounter(&v1);
+  stamp1 = (unsigned __int64)v1.QuadPart;
+  DelayFunction(uiParameter);
+  LARGE_INTEGER v2;
+  QueryPerformanceCounter(&v2);
+  stamp2 = (unsigned __int64)v2.QuadPart;
 #  else
   stamp1 = __rdtsc();
   DelayFunction(uiParameter);
